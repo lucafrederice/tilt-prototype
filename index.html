@@ -1,0 +1,473 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Tilt Controls Prototype</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #0b0d12; color: #e8ecf3;
+    font: 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    touch-action: none; user-select: none; -webkit-user-select: none; overscroll-behavior: none; }
+  canvas#c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+
+  #hud { position: fixed; left: 0; right: 0; top: 0; padding: calc(env(safe-area-inset-top) + 8px) 12px 8px;
+    display: flex; gap: 10px; align-items: flex-start; pointer-events: none;
+    background: linear-gradient(#0b0d12cc, #0b0d1200); }
+  #stats { font: 12px/1.4 ui-monospace, Menlo, monospace; opacity: .9; flex: 1; }
+  #speedbar { width: 100%; height: 4px; background: #ffffff22; border-radius: 2px; margin-top: 4px; overflow: hidden; }
+  #speedfill { height: 100%; width: 0; background: #5ee6a8; }
+  #gear { pointer-events: auto; width: 40px; height: 40px; border-radius: 12px; border: 0; background: #ffffff1a; color: #fff; font-size: 20px; }
+
+  #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 70px); transform: translateX(-50%);
+    background: #5ee6a8; color: #062b1b; font-weight: 600; padding: 6px 14px; border-radius: 999px;
+    opacity: 0; transition: opacity .25s; pointer-events: none; }
+  #toast.show { opacity: 1; }
+  #crosshair { position: fixed; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px; border-radius: 50%; background: #ffffffaa; pointer-events: none; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .15s; }
+
+  /* one-thumb button cluster, bottom right (mirrored for left hand) */
+  #controls { position: fixed; right: calc(env(safe-area-inset-right) + 14px); bottom: calc(env(safe-area-inset-bottom) + 18px);
+    width: 190px; height: 190px; pointer-events: none; }
+  body.lefty #controls { right: auto; left: calc(env(safe-area-inset-left) + 14px); transform: scaleX(-1); }
+  body.lefty #controls .btn span { transform: scaleX(-1); display: inline-block; }
+  .btn { position: absolute; pointer-events: auto; border: 0; border-radius: 50%; color: #fff; font-weight: 700;
+    font-size: 12px; display: flex; align-items: center; justify-content: center; text-align: center;
+    background: #ffffff22; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+  .btn:active { transform: scale(.94); }
+  #bInteract { width: 84px; height: 84px; right: 0; bottom: 0; background: #2f6bff; }
+  #bInteract.off { background: #ffffff1f; color: #ffffff66; }
+  #bPunch { width: 64px; height: 64px; right: 96px; bottom: 6px; background: #e5484d; }
+  #bBack { width: 64px; height: 64px; right: 6px; bottom: 96px; background: #ffffff33; font-size: 22px; }
+  #bMeeting { width: 52px; height: 52px; right: 86px; bottom: 86px; background: #f5a524; color: #2a1a00; font-size: 10px; }
+
+  /* touch fallback joystick */
+  #pad { position: fixed; left: 0; bottom: 0; width: 60%; height: 45%; display: none; }
+  body.touch #pad { display: block; }
+  body.touch.lefty #pad { left: auto; right: 0; }
+  #ring { position: fixed; width: 120px; height: 120px; margin: -60px; border-radius: 50%; border: 2px solid #ffffff55; display: none; pointer-events: none; }
+  #knob { position: absolute; left: 50%; top: 50%; width: 48px; height: 48px; margin: -24px; border-radius: 50%; background: #ffffff66; }
+
+  .overlay { position: fixed; inset: 0; background: #0b0d12f0; display: none; flex-direction: column; justify-content: center;
+    padding: calc(env(safe-area-inset-top) + 24px) 24px calc(env(safe-area-inset-bottom) + 24px); gap: 14px; overflow-y: auto; touch-action: pan-y; }
+  .overlay.show { display: flex; }
+  .overlay h1 { margin: 0; font-size: 24px; }
+  .overlay p { margin: 0; color: #b7bfcc; }
+  .big { border: 0; border-radius: 14px; padding: 15px; font-size: 16px; font-weight: 700; color: #fff; background: #2f6bff; }
+  .big.alt { background: #ffffff1f; }
+  #startMsg { color: #f5a524; min-height: 1em; }
+
+  #settings { justify-content: flex-start; }
+  .row { display: grid; grid-template-columns: 1fr 52px; gap: 4px 10px; align-items: center; }
+  .row label { font-weight: 600; }
+  .row output { text-align: right; font-variant-numeric: tabular-nums; color: #5ee6a8; }
+  .row input[type=range] { grid-column: 1 / 3; width: 100%; }
+  .chk { display: flex; gap: 10px; align-items: center; font-weight: 600; }
+  .chk input { width: 22px; height: 22px; }
+
+  #task .bar { height: 14px; border-radius: 7px; background: #ffffff22; overflow: hidden; }
+  #task .bar div { height: 100%; width: 0; background: #5ee6a8; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="crosshair"></div>
+<div id="flash"></div>
+
+<div id="hud">
+  <div id="stats">
+    <div id="sMode">—</div>
+    <div id="sTilt">tilt 0.0°</div>
+    <div id="sTurn">turn 0.0°</div>
+    <div id="speedbar"><div id="speedfill"></div></div>
+  </div>
+  <button id="gear" aria-label="Settings">⚙︎</button>
+</div>
+<div id="toast">Centered</div>
+
+<div id="pad"></div>
+<div id="ring"><div id="knob"></div></div>
+
+<div id="controls">
+  <button class="btn off" id="bInteract"><span>Interact</span></button>
+  <button class="btn" id="bPunch"><span>Punch</span></button>
+  <button class="btn" id="bBack" aria-label="Turn back"><span>↶</span></button>
+  <button class="btn" id="bMeeting"><span>Meet</span></button>
+</div>
+
+<div class="overlay show" id="start">
+  <h1>Tilt controls prototype</h1>
+  <p>Hold the phone upright in one hand. Tilt the top away from you to walk, turn the phone left or right to look. ↶ turns you around. Double-tap empty screen to recenter.</p>
+  <p>Neutral is set when you start, after every task and after every meeting.</p>
+  <button class="big" id="startTilt">Start with tilt</button>
+  <button class="big alt" id="startTouch">Use touch controls</button>
+  <p id="startMsg"></p>
+</div>
+
+<div class="overlay" id="settings">
+  <h1>Tuning</h1>
+  <div id="sliders"></div>
+  <label class="chk"><input type="checkbox" id="lefty"> Left-handed layout</label>
+  <label class="chk"><input type="checkbox" id="touchMode"> Touch controls instead of tilt</label>
+  <button class="big alt" id="resetDefaults">Reset to defaults</button>
+  <button class="big" id="closeSettings">Done</button>
+</div>
+
+<div class="overlay" id="meeting">
+  <h1>Emergency meeting</h1>
+  <p>(Placeholder.) This is where the portrait chat and voting screen would go. Closing it recenters the controls.</p>
+  <button class="big" id="closeMeeting">Back to game</button>
+</div>
+
+<div class="overlay" id="task">
+  <h1>Task</h1>
+  <p>Hold still… the controls recenter when it finishes.</p>
+  <div class="bar"><div id="taskFill"></div></div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(function () {
+'use strict';
+const DEG = Math.PI / 180;
+
+// ---------- settings ----------
+const DEFAULTS = { dead: 5, maxTilt: 20, direct: 25, ramp: 20, maxTurn: 120, speed: 3, fov: 85, smooth: 0.25 };
+const SLIDERS = [
+  ['dead',    'Dead zone (°)',              0, 15, 0.5],
+  ['maxTilt', 'Full speed at tilt (°)',     8, 40, 0.5],
+  ['direct',  'Direct turn zone (°)',       5, 45, 1],
+  ['ramp',    'Extra turn to max rate (°)', 5, 40, 1],
+  ['maxTurn', 'Max turn rate (°/s)',       30, 300, 5],
+  ['speed',   'Walk speed (m/s)',           1, 6, 0.1],
+  ['fov',     'Horizontal field of view (°)', 60, 110, 1],
+  ['smooth',  'Sensor smoothing (low = smoother)', 0.05, 1, 0.05],
+];
+const S = Object.assign({}, DEFAULTS);
+let prefs = { lefty: false };
+try { Object.assign(S, JSON.parse(localStorage.getItem('tiltS') || '{}')); Object.assign(prefs, JSON.parse(localStorage.getItem('tiltP') || '{}')); } catch (e) {}
+function save() { try { localStorage.setItem('tiltS', JSON.stringify(S)); localStorage.setItem('tiltP', JSON.stringify(prefs)); } catch (e) {} }
+
+// ---------- renderer / scene ----------
+const canvas = document.getElementById('c');
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x0b0d12);
+scene.fog = new THREE.Fog(0x0b0d12, 6, 26);
+const camera = new THREE.PerspectiveCamera(70, 1, 0.05, 100);
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x404654, 1.0));
+const sun = new THREE.DirectionalLight(0xffffff, 0.5); sun.position.set(4, 10, 6); scene.add(sun);
+
+function applyFov() {
+  const w = window.innerWidth, h = window.innerHeight, aspect = w / h;
+  renderer.setSize(w, h, false);
+  camera.aspect = aspect;
+  // three.js fov is vertical; convert from the horizontal FOV setting
+  const v = 2 * Math.atan(Math.tan(S.fov * DEG / 2) / aspect) / DEG;
+  camera.fov = Math.min(v, 150);
+  camera.updateProjectionMatrix();
+}
+window.addEventListener('resize', applyFov);
+
+// ---------- map ----------
+const walls = []; // AABBs {x1,z1,x2,z2}
+const wallMat = new THREE.MeshLambertMaterial({ color: 0x3a4152 });
+const T = 0.3, H = 3;
+function box(x1, z1, x2, z2, h, mat) {
+  const minx = Math.min(x1, x2), maxx = Math.max(x1, x2), minz = Math.min(z1, z2), maxz = Math.max(z1, z2);
+  const m = new THREE.Mesh(new THREE.BoxGeometry(maxx - minx, h, maxz - minz), mat || wallMat);
+  m.position.set((minx + maxx) / 2, h / 2, (minz + maxz) / 2);
+  scene.add(m);
+  walls.push({ x1: minx, z1: minz, x2: maxx, z2: maxz });
+}
+function wallH(z, xa, xb) { box(xa, z - T / 2, xb, z + T / 2, H); }   // runs along x
+function wallV(x, za, zb) { box(x - T / 2, za, x + T / 2, zb, H); }   // runs along z
+
+wallH(-20, -10, 10); wallH(20, -10, 10); wallV(-10, -20, 20); wallV(10, -20, 20);
+wallH(-7, -10, -1.5); wallH(-7, 1.5, 10);
+wallH(7, -10, -5); wallH(7, -2, 2); wallH(7, 5, 10);
+wallV(0, -20, -15); wallV(0, -12, -7);
+const crate = new THREE.MeshLambertMaterial({ color: 0x6b5a45 });
+box(-1.5, 12, 1.5, 15, 2.2, crate);
+box(-6, -2, -4.8, -0.8, 1.2, crate); box(4.5, 2.5, 5.7, 3.7, 1.2, crate);
+
+function floor(x1, z1, x2, z2, color) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(x2 - x1, z2 - z1), new THREE.MeshLambertMaterial({ color }));
+  m.rotation.x = -Math.PI / 2; m.position.set((x1 + x2) / 2, 0, (z1 + z2) / 2); scene.add(m);
+}
+floor(-10, -20, 0, -7, 0x24344a); floor(0, -20, 10, -7, 0x3a2a40);
+floor(-10, -7, 10, 7, 0x2a2f38); floor(-10, 7, 10, 20, 0x2c3a2c);
+const grid = new THREE.GridHelper(40, 40, 0x000000, 0x000000);
+grid.material.opacity = 0.18; grid.material.transparent = true; grid.position.y = 0.01; scene.add(grid);
+const ceil = new THREE.Mesh(new THREE.PlaneGeometry(20, 40), new THREE.MeshLambertMaterial({ color: 0x2b303c }));
+ceil.rotation.x = Math.PI / 2; ceil.position.y = H; scene.add(ceil);
+
+// task stations
+const stations = [[-7, -17], [7, -17], [-8, 0], [8, 0], [-7, 17], [7, 17]].map(([x, z]) => {
+  const mat = new THREE.MeshLambertMaterial({ color: 0x333333, emissive: 0xd9a400, emissiveIntensity: 0.8 });
+  const m = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.1, 0.9), mat);
+  m.position.set(x, 0.55, z); scene.add(m);
+  walls.push({ x1: x - 0.45, z1: z - 0.45, x2: x + 0.45, z2: z + 0.45 });
+  return { x, z, mat, done: false };
+});
+
+// placeholder characters (generic capsules)
+const npcs = [[-5, -12, 0xe5484d], [5, -10, 0x2f6bff], [3, 2, 0x5ee6a8], [-3, -3, 0xf5a524], [-4, 14, 0xb37feb], [6, 12, 0xffffff]]
+  .map(([x, z, color]) => {
+    const g = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ color });
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.32, 1.1, 14), mat); body.position.y = 0.75;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.26, 14, 10), mat); head.position.y = 1.55;
+    g.add(body, head); g.position.set(x, 0, z); g.rotation.y = Math.random() * 6.28; scene.add(g);
+    return { g, x, z, down: false, phase: Math.random() * 6 };
+  });
+
+// ---------- player state ----------
+const player = { x: 0, z: 4, yaw: 0, r: 0.3 };   // yaw in radians, 0 = looking -Z
+let directYaw = 0;          // radians, part of view that follows the phone directly
+let speedFrac = 0;          // 0..1
+let turnAnim = null;        // {from, to, t}
+let mode = 'none';          // 'tilt' | 'touch' | 'none'
+let paused = true;
+
+// ---------- orientation math ----------
+// Same convention as three.js DeviceOrientationControls: device quaternion -> camera frame.
+const zee = new THREE.Vector3(0, 0, 1);
+const qX = new THREE.Quaternion(-Math.sqrt(0.5), 0, 0, Math.sqrt(0.5)); // -90° around X
+const tmpE = new THREE.Euler();
+function deviceQuat(alpha, beta, gamma, orient) {
+  tmpE.set(beta * DEG, alpha * DEG, -gamma * DEG, 'YXZ');
+  const q = new THREE.Quaternion().setFromEuler(tmpE);
+  q.multiply(qX);
+  q.multiply(new THREE.Quaternion().setFromAxisAngle(zee, -orient * DEG));
+  return q;
+}
+// Rotation of the current pose relative to neutral, expressed in the phone's own frame,
+// so it works the same sitting, standing or lying down.
+function relAngles(qNeutral, qNow) {
+  const qr = qNeutral.clone().invert().multiply(qNow);
+  const e = new THREE.Euler().setFromQuaternion(qr, 'YXZ');
+  return { yaw: e.y / DEG, pitch: e.x / DEG }; // yaw + = turned left, pitch + = top tilted toward you
+}
+function screenOrient() {
+  return (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0);
+}
+
+let qNow = null, qNeutral = null, gotEvent = false;
+let tiltS = 0, yawS = 0, rawTilt = 0, rawYaw = 0;
+function onOrient(e) {
+  if (e.alpha == null && e.beta == null && e.gamma == null) return;
+  gotEvent = true;
+  qNow = deviceQuat(e.alpha || 0, e.beta || 0, e.gamma || 0, screenOrient());
+  if (!qNeutral) recenter(true);
+}
+
+function recenter(silent) {
+  // keep the current view: fold the direct part into the base yaw
+  player.yaw += directYaw; directYaw = 0;
+  if (qNow) qNeutral = qNow.clone();
+  tiltS = yawS = rawTilt = rawYaw = 0;
+  touch.fwd = 0; touch.turn = 0;
+  showToast(silent ? 'Centered' : 'Centered');
+}
+
+// Exposed for automated tests
+window.__tilt = { deviceQuat, relAngles, S, player, get speedFrac() { return speedFrac; }, get directYaw() { return directYaw; },
+  setPose(a, b, g) { onOrient({ alpha: a, beta: b, gamma: g }); }, step: (dt) => update(dt), recenter, startMode: (m) => begin(m) };
+
+// ---------- touch fallback ----------
+const touch = { id: null, ox: 0, oy: 0, fwd: 0, turn: 0 };
+const pad = document.getElementById('pad'), ring = document.getElementById('ring'), knob = document.getElementById('knob');
+pad.addEventListener('pointerdown', (e) => {
+  if (mode !== 'touch' || paused) return;
+  touch.id = e.pointerId; touch.ox = e.clientX; touch.oy = e.clientY;
+  ring.style.display = 'block'; ring.style.left = e.clientX + 'px'; ring.style.top = e.clientY + 'px';
+  pad.setPointerCapture(e.pointerId);
+});
+pad.addEventListener('pointermove', (e) => {
+  if (e.pointerId !== touch.id) return;
+  let dx = e.clientX - touch.ox, dy = e.clientY - touch.oy;
+  const len = Math.hypot(dx, dy), R = 60;
+  if (len > R) { dx *= R / len; dy *= R / len; }
+  knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  touch.fwd = Math.max(-0.5, Math.min(1, -dy / R));
+  touch.turn = -dx / R; // + = left
+});
+function endPad(e) {
+  if (e.pointerId !== touch.id) return;
+  touch.id = null; touch.fwd = 0; touch.turn = 0; ring.style.display = 'none'; knob.style.transform = '';
+}
+pad.addEventListener('pointerup', endPad); pad.addEventListener('pointercancel', endPad);
+
+// double-tap empty screen to recenter
+let lastTap = 0, lastX = 0, lastY = 0;
+canvas.addEventListener('pointerdown', (e) => {
+  if (paused) return;
+  const t = performance.now();
+  if (t - lastTap < 320 && Math.hypot(e.clientX - lastX, e.clientY - lastY) < 40) { recenter(); lastTap = 0; return; }
+  lastTap = t; lastX = e.clientX; lastY = e.clientY;
+});
+
+// ---------- buttons ----------
+const $ = (id) => document.getElementById(id);
+const bInteract = $('bInteract');
+let nearStation = null;
+function press(el, fn) { el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (!paused) fn(); }); }
+press($('bBack'), () => { if (!turnAnim) turnAnim = { from: player.yaw, to: player.yaw + Math.PI, t: 0 }; });
+press($('bPunch'), () => {
+  const vy = player.yaw + directYaw, fx = -Math.sin(vy), fz = -Math.cos(vy);
+  let hit = null;
+  for (const n of npcs) {
+    if (n.down) continue;
+    const dx = n.x - player.x, dz = n.z - player.z, d = Math.hypot(dx, dz);
+    if (d < 2 && (dx * fx + dz * fz) / d > 0.8) { hit = n; break; }
+  }
+  if (hit) { hit.down = true; hit.g.rotation.z = Math.PI / 2; hit.g.position.y = 0.3; }
+  const f = $('flash'); f.style.opacity = hit ? 0.35 : 0.12; setTimeout(() => (f.style.opacity = 0), 90);
+});
+press($('bMeeting'), () => { paused = true; $('meeting').classList.add('show'); });
+$('closeMeeting').addEventListener('click', () => { $('meeting').classList.remove('show'); paused = false; recenter(); });
+press(bInteract, () => {
+  if (!nearStation || nearStation.done) return;
+  paused = true; const st = nearStation; $('task').classList.add('show');
+  const fill = $('taskFill'); const t0 = performance.now();
+  (function tick() {
+    const p = Math.min(1, (performance.now() - t0) / 1500); fill.style.width = (p * 100) + '%';
+    if (p < 1) return requestAnimationFrame(tick);
+    st.done = true; st.mat.emissive.setHex(0x2bd47d);
+    $('task').classList.remove('show'); paused = false; recenter();
+  })();
+});
+
+// ---------- settings UI ----------
+const sl = $('sliders');
+for (const [key, label, min, max, step] of SLIDERS) {
+  const row = document.createElement('div'); row.className = 'row';
+  row.innerHTML = `<label for="s_${key}">${label}</label><output id="o_${key}"></output><input type="range" id="s_${key}" min="${min}" max="${max}" step="${step}">`;
+  sl.appendChild(row);
+  const inp = row.querySelector('input'), out = row.querySelector('output');
+  inp.value = S[key]; out.textContent = S[key];
+  inp.addEventListener('input', () => { S[key] = parseFloat(inp.value); out.textContent = S[key]; if (key === 'fov') applyFov(); save(); });
+}
+function syncSliders() { for (const [key] of SLIDERS) { $('s_' + key).value = S[key]; $('o_' + key).textContent = S[key]; } }
+$('gear').addEventListener('click', () => { paused = true; $('touchMode').checked = mode === 'touch'; $('settings').classList.add('show'); });
+$('closeSettings').addEventListener('click', () => {
+  $('settings').classList.remove('show');
+  const wantTouch = $('touchMode').checked;
+  if (wantTouch && mode !== 'touch') setMode('touch');
+  else if (!wantTouch && mode === 'touch') { startTilt(); return; }
+  paused = mode === 'none'; recenter();
+});
+$('resetDefaults').addEventListener('click', () => { Object.assign(S, DEFAULTS); syncSliders(); applyFov(); save(); });
+$('lefty').checked = !!prefs.lefty; document.body.classList.toggle('lefty', !!prefs.lefty);
+$('lefty').addEventListener('change', () => { prefs.lefty = $('lefty').checked; document.body.classList.toggle('lefty', prefs.lefty); save(); });
+
+// ---------- start ----------
+function setMode(m) {
+  mode = m; document.body.classList.toggle('touch', m === 'touch');
+  $('sMode').textContent = m === 'tilt' ? 'mode: tilt' : 'mode: touch (drag bottom-left)';
+}
+function begin(m) { setMode(m); $('start').classList.remove('show'); paused = false; recenter(true); }
+async function startTilt() {
+  const msg = $('startMsg'); msg.textContent = '';
+  if (!window.isSecureContext) { msg.textContent = 'Tilt needs an https:// page. Switched to touch controls.'; return begin('touch'); }
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();
+      if (r !== 'granted') { $('start').classList.add('show'); msg.textContent = 'Motion access was denied. Allow it in your browser settings, or use touch controls.'; return; }
+    }
+  } catch (e) { $('start').classList.add('show'); msg.textContent = 'Motion access is blocked in this view. Open the page directly in Safari or Chrome, or use touch controls.'; return; }
+  window.addEventListener('deviceorientation', onOrient);
+  gotEvent = false; qNeutral = null;
+  setTimeout(() => {
+    if (gotEvent) { begin('tilt'); }
+    else { window.removeEventListener('deviceorientation', onOrient); $('start').classList.add('show');
+      msg.textContent = 'No motion data here (desktop, or a sandboxed preview). Open the page directly on your phone, or use touch controls.'; }
+  }, 900);
+}
+$('startTilt').addEventListener('click', startTilt);
+$('startTouch').addEventListener('click', () => begin('touch'));
+
+// ---------- toast ----------
+let toastT = 0;
+function showToast(text) { const t = $('toast'); t.textContent = text; t.classList.add('show'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.remove('show'), 900); }
+
+// ---------- movement ----------
+function collides(x, z) {
+  const r = player.r;
+  for (const w of walls) if (x > w.x1 - r && x < w.x2 + r && z > w.z1 - r && z < w.z2 + r) return true;
+  return false;
+}
+function update(dt) {
+  let turnRate = 0; // rad/s, + = left
+  if (mode === 'tilt' && qNow && qNeutral) {
+    const a = relAngles(qNeutral, qNow);
+    rawTilt = -a.pitch; rawYaw = a.yaw;
+    const k = 1 - Math.pow(1 - S.smooth, dt * 60);
+    tiltS += (rawTilt - tiltS) * k; yawS += (rawYaw - yawS) * k;
+    // walking: dead zone -> linear -> capped
+    speedFrac = tiltS <= S.dead ? 0 : tiltS >= S.maxTilt ? 1 : (tiltS - S.dead) / (S.maxTilt - S.dead);
+    // turning: direct within zone, steady rate beyond it
+    const ay = Math.abs(yawS), sg = Math.sign(yawS);
+    directYaw = sg * Math.min(ay, S.direct) * DEG;
+    if (ay > S.direct) turnRate = sg * Math.min((ay - S.direct) / S.ramp, 1) * S.maxTurn * DEG;
+  } else if (mode === 'touch') {
+    speedFrac = touch.fwd; directYaw = 0;
+    turnRate = touch.turn * S.maxTurn * DEG;
+    tiltS = touch.fwd; yawS = touch.turn;
+  } else { speedFrac = 0; }
+
+  if (turnAnim) {
+    turnAnim.t = Math.min(1, turnAnim.t + dt / 0.3);
+    const e = turnAnim.t < 0.5 ? 2 * turnAnim.t * turnAnim.t : 1 - Math.pow(-2 * turnAnim.t + 2, 2) / 2;
+    player.yaw = turnAnim.from + (turnAnim.to - turnAnim.from) * e;
+    if (turnAnim.t >= 1) turnAnim = null;
+  } else {
+    player.yaw += turnRate * dt;
+  }
+
+  const vy = player.yaw + directYaw;
+  const v = speedFrac * S.speed * dt;
+  const nx = player.x - Math.sin(vy) * v, nz = player.z - Math.cos(vy) * v;
+  if (!collides(nx, player.z)) player.x = nx;
+  if (!collides(player.x, nz)) player.z = nz;
+
+  // head bob while walking
+  bob += dt * 9 * Math.abs(speedFrac);
+  camera.position.set(player.x, 1.6 + Math.sin(bob) * 0.03 * Math.abs(speedFrac), player.z);
+  camera.rotation.set(0, vy, 0, 'YXZ');
+
+  // nearest station
+  nearStation = null;
+  for (const s of stations) if (!s.done && Math.hypot(s.x - player.x, s.z - player.z) < 1.6) nearStation = s;
+  bInteract.classList.toggle('off', !nearStation);
+
+  for (const n of npcs) if (!n.down) { n.phase += dt; n.g.position.y = Math.sin(n.phase * 2) * 0.03; }
+
+  if (mode === 'tilt') {
+    $('sTilt').textContent = `tilt ${tiltS.toFixed(1)}°  (walk ${S.dead}–${S.maxTilt}°)`;
+    $('sTurn').textContent = `turn ${yawS.toFixed(1)}°  (direct ±${S.direct}°)`;
+  } else if (mode === 'touch') {
+    $('sTilt').textContent = `fwd ${touch.fwd.toFixed(2)}`;
+    $('sTurn').textContent = `turn ${touch.turn.toFixed(2)}`;
+  }
+  $('speedfill').style.width = (Math.max(0, speedFrac) * 100) + '%';
+}
+let bob = 0;
+
+// ---------- loop ----------
+applyFov();
+let last = performance.now();
+function frame(now) {
+  const dt = Math.min(0.05, (now - last) / 1000); last = now;
+  if (!paused) update(dt);
+  else { camera.position.set(player.x, 1.6, player.z); camera.rotation.set(0, player.yaw + directYaw, 0, 'YXZ'); }
+  renderer.render(scene, camera);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
