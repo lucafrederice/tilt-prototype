@@ -40,6 +40,8 @@
   #bPunch { width: 64px; height: 64px; right: 96px; bottom: 6px; background: #e5484d; }
   #bBack { width: 64px; height: 64px; right: 6px; bottom: 96px; background: #ffffff33; font-size: 22px; }
   #bRecenter { width: 52px; height: 52px; right: 12px; bottom: 172px; background: #5ee6a8; color: #062b1b; font-size: 22px; }
+  #bAuto { width: 44px; height: 44px; right: 76px; bottom: 160px; background: #2f6bff; font-size: 20px; }
+  #bAuto.off { background: #ffffff1f; color: #ffffff66; text-decoration: line-through; }
   #bMeeting { width: 52px; height: 52px; right: 86px; bottom: 86px; background: #f5a524; color: #2a1a00; font-size: 10px; }
 
   /* touch fallback joystick */
@@ -95,6 +97,7 @@
   <button class="btn" id="bBack" aria-label="Turn back"><span>↶</span></button>
   <button class="btn" id="bMeeting"><span>Meet</span></button>
   <button class="btn" id="bRecenter" aria-label="Recenter"><span>⊙</span></button>
+  <button class="btn" id="bAuto" aria-label="Auto-turn on/off"><span>↻</span></button>
 </div>
 
 <div class="overlay show" id="start">
@@ -146,7 +149,7 @@ const SLIDERS = [
   ['smooth',  'Sensor smoothing (low = smoother)', 0.05, 1, 0.05],
 ];
 const S = Object.assign({}, DEFAULTS);
-let prefs = { lefty: false };
+let prefs = { lefty: false, autoTurn: true };
 try { Object.assign(S, JSON.parse(localStorage.getItem('tiltS') || '{}')); Object.assign(prefs, JSON.parse(localStorage.getItem('tiltP') || '{}')); } catch (e) {}
 function save() { try { localStorage.setItem('tiltS', JSON.stringify(S)); localStorage.setItem('tiltP', JSON.stringify(prefs)); } catch (e) {} }
 
@@ -317,6 +320,14 @@ const bInteract = $('bInteract');
 let nearStation = null;
 function press(el, fn) { el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (!paused) fn(); }); }
 press($('bRecenter'), () => recenter());
+const bAuto = $('bAuto');
+function syncAuto() { bAuto.classList.toggle('off', prefs.autoTurn === false); }
+syncAuto();
+press(bAuto, () => {
+  prefs.autoTurn = prefs.autoTurn === false; save(); syncAuto();
+  recenter(); // new neutral = current hold, so the view doesn't jump when the mode changes
+  showToast(prefs.autoTurn ? 'Auto-turn on' : 'Auto-turn off');
+});
 press($('bBack'), () => { if (!turnAnim) turnAnim = { from: player.yaw, to: player.yaw + Math.PI, t: 0 }; });
 press($('bPunch'), () => {
   const vy = player.yaw + directYaw, fx = -Math.sin(vy), fz = -Math.cos(vy);
@@ -413,8 +424,12 @@ function update(dt) {
     speedFrac = tiltS <= S.dead ? 0 : tiltS >= S.maxTilt ? 1 : (tiltS - S.dead) / (S.maxTilt - S.dead);
     // turning: direct within zone, steady rate beyond it
     const ay = Math.abs(yawS), sg = Math.sign(yawS);
-    directYaw = sg * Math.min(ay, S.direct) * DEG;
-    if (ay > S.direct) turnRate = sg * Math.min((ay - S.direct) / S.ramp, 1) * S.maxTurn * DEG;
+    if (prefs.autoTurn === false) {
+      directYaw = yawS * DEG; // view follows the phone 1:1 at any angle, never keeps turning
+    } else {
+      directYaw = sg * Math.min(ay, S.direct) * DEG;
+      if (ay > S.direct) turnRate = sg * Math.min((ay - S.direct) / S.ramp, 1) * S.maxTurn * DEG;
+    }
   } else if (mode === 'touch') {
     speedFrac = touch.fwd; directYaw = 0;
     turnRate = touch.turn * S.maxTurn * DEG;
@@ -450,7 +465,7 @@ function update(dt) {
 
   if (mode === 'tilt') {
     $('sTilt').textContent = `tilt ${tiltS.toFixed(1)}°  (walk ${S.dead}–${S.maxTilt}°)`;
-    $('sTurn').textContent = `turn ${yawS.toFixed(1)}°  (direct ±${S.direct}°)`;
+    $('sTurn').textContent = `turn ${yawS.toFixed(1)}°  (${prefs.autoTurn === false ? 'auto-turn off, 1:1' : 'direct ±' + S.direct + '°'})`;
   } else if (mode === 'touch') {
     $('sTilt').textContent = `fwd ${touch.fwd.toFixed(2)}`;
     $('sTurn').textContent = `turn ${touch.turn.toFixed(2)}`;
