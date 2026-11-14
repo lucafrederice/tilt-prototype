@@ -39,6 +39,7 @@
   #bInteract.off { background: #ffffff1f; color: #ffffff66; }
   #bPunch { width: 64px; height: 64px; right: 96px; bottom: 6px; background: #e5484d; }
   #bBack { width: 64px; height: 64px; right: 6px; bottom: 96px; background: #ffffff33; font-size: 22px; }
+  #bRecenter { width: 52px; height: 52px; right: 12px; bottom: 172px; background: #5ee6a8; color: #062b1b; font-size: 22px; }
   #bMeeting { width: 52px; height: 52px; right: 86px; bottom: 86px; background: #f5a524; color: #2a1a00; font-size: 10px; }
 
   /* touch fallback joystick */
@@ -93,11 +94,12 @@
   <button class="btn" id="bPunch"><span>Punch</span></button>
   <button class="btn" id="bBack" aria-label="Turn back"><span>↶</span></button>
   <button class="btn" id="bMeeting"><span>Meet</span></button>
+  <button class="btn" id="bRecenter" aria-label="Recenter"><span>⊙</span></button>
 </div>
 
 <div class="overlay show" id="start">
   <h1>Tilt controls prototype</h1>
-  <p>Hold the phone upright in one hand. Tilt the top away from you to walk, turn the phone left or right to look. ↶ turns you around. Double-tap empty screen to recenter.</p>
+  <p>Hold the phone upright in one hand. Tilt the top away from you to walk, turn the phone left or right to look. ↶ turns you around. ⊙ (or a double-tap on empty screen) recenters to how you're holding the phone right now.</p>
   <p>Neutral is set when you start, after every task and after every meeting.</p>
   <button class="big" id="startTilt">Start with tilt</button>
   <button class="big alt" id="startTouch">Use touch controls</button>
@@ -314,6 +316,7 @@ const $ = (id) => document.getElementById(id);
 const bInteract = $('bInteract');
 let nearStation = null;
 function press(el, fn) { el.addEventListener('pointerdown', (e) => { e.preventDefault(); e.stopPropagation(); if (!paused) fn(); }); }
+press($('bRecenter'), () => recenter());
 press($('bBack'), () => { if (!turnAnim) turnAnim = { from: player.yaw, to: player.yaw + Math.PI, t: 0 }; });
 press($('bPunch'), () => {
   const vy = player.yaw + directYaw, fx = -Math.sin(vy), fz = -Math.cos(vy);
