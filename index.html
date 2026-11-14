@@ -144,22 +144,25 @@
 const DEG = Math.PI / 180;
 
 // ---------- settings ----------
-const DEFAULTS = { dead: 5, maxTilt: 20, turnDead: 5, turnMax: 20, maxTurn: 120, leak: 8, speed: 3, fov: 85, smooth: 0.25 };
+const DEFAULTS = { dead: 5, maxTilt: 20, turnDead: 3, turnMax: 12, maxTurn: 120, speed: 3, fov: 85, smooth: 0.25 };
 const SLIDERS = [
   ['dead',    'Dead zone (°)',              0, 15, 0.5],
   ['maxTilt', 'Full speed at tilt (°)',     8, 40, 0.5],
   ['turnDead', 'Turn dead zone (°)',         0, 15, 0.5],
   ['turnMax',  'Full turn speed at (°)',      8, 40, 0.5],
   ['maxTurn', 'Max turn rate (°/s)',       30, 300, 5],
-  ['leak',    'Auto-recenter time (s, 0 = off)', 0, 20, 0.5],
   ['speed',   'Walk speed (m/s)',           1, 6, 0.1],
   ['fov',     'Horizontal field of view (°)', 60, 110, 1],
   ['smooth',  'Sensor smoothing (low = smoother)', 0.05, 1, 0.05],
 ];
 const S = Object.assign({}, DEFAULTS);
 let prefs = { lefty: false, autoTurn: true, steerRoll: true };
-try { Object.assign(S, JSON.parse(localStorage.getItem('tiltS') || '{}')); Object.assign(prefs, JSON.parse(localStorage.getItem('tiltP') || '{}')); } catch (e) {}
-function save() { try { localStorage.setItem('tiltS', JSON.stringify(S)); localStorage.setItem('tiltP', JSON.stringify(prefs)); } catch (e) {} }
+try {
+  // v2: new turn defaults; carry over other saved values but not the old turn ones
+  let saved = localStorage.getItem('tiltS2');
+  if (saved) Object.assign(S, JSON.parse(saved));
+  else { const old = JSON.parse(localStorage.getItem('tiltS') || '{}'); delete old.turnDead; delete old.turnMax; delete old.leak; Object.assign(S, old); } Object.assign(prefs, JSON.parse(localStorage.getItem('tiltP') || '{}')); } catch (e) {}
+function save() { try { localStorage.setItem('tiltS2', JSON.stringify(S)); localStorage.setItem('tiltP', JSON.stringify(prefs)); } catch (e) {} }
 
 // ---------- renderer / scene ----------
 const canvas = document.getElementById('c');
@@ -440,12 +443,6 @@ function update(dt) {
   let turnRate = 0; // rad/s, + = left
   if (mode === 'tilt' && qNow && qNeutral) {
     const g = gravAngles(qNow);
-    // slow auto-recenter: neutral drifts toward the current hold
-    if (S.leak > 0) {
-      const lk = Math.min(1, dt / S.leak);
-      nPitch += wrap(g.pitch - nPitch) * lk; nAng += wrap(g.ang - nAng) * lk;
-      qNeutral.slerp(qNow, lk);
-    }
     rawTilt = wrap(g.pitch - nPitch);
     if (prefs.steerRoll !== false) {
       // steering wheel: rotating the phone CCW turns gravity CW across the screen
@@ -506,7 +503,7 @@ function update(dt) {
   for (const n of npcs) if (!n.down) { n.phase += dt; n.g.position.y = Math.sin(n.phase * 2) * 0.03; }
 
   if (mode === 'tilt') {
-    $('sMode').textContent = 'mode: tilt · steer: ' + (prefs.steerRoll !== false ? 'tilt sideways' : 'rotate phone') + (S.leak > 0 ? ' · auto-recenter ' + S.leak + 's' : '');
+    $('sMode').textContent = 'mode: tilt · steer: ' + (prefs.steerRoll !== false ? 'tilt sideways' : 'rotate phone');
     $('sTilt').textContent = `tilt ${tiltS.toFixed(1)}°  (walk ${S.dead}–${S.maxTilt}°)`;
     $('sTurn').textContent = `turn ${yawS.toFixed(1)}°  (${prefs.autoTurn === false ? 'auto-turn off, 1:1' : 'turn ' + S.turnDead + '–' + S.turnMax + '°'})`;
   } else if (mode === 'touch') {
