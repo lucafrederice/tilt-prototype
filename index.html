@@ -108,7 +108,7 @@
 
 <div class="overlay show" id="start">
   <h1>Tilt controls prototype</h1>
-  <p>Hold the phone upright in one hand. Tilt the top away from you to walk, turn the phone left or right to look. ↶ turns you around. ⊙ (or a double-tap on empty screen) recenters to how you're holding the phone right now.</p>
+  <p>Hold the phone upright in one hand. Tilt the top away from you to walk. Tilt the phone sideways like a steering wheel to turn (or rotate it left/right, in settings). ↶ turns you around. ⊙ (or a double-tap on empty screen) recenters to how you're holding the phone right now.</p>
   <p>Neutral is set when you start, after every task and after every meeting.</p>
   <button class="big" id="startTilt">Start with tilt</button>
   <button class="big alt" id="startTouch">Use touch controls</button>
@@ -118,6 +118,7 @@
 <div class="overlay" id="settings">
   <h1>Tuning</h1>
   <div id="sliders"></div>
+  <label class="chk"><input type="checkbox" id="steerRoll"> Steer by tilting sideways (ignores body turning)</label>
   <label class="chk"><input type="checkbox" id="lefty"> Left-handed layout</label>
   <label class="chk"><input type="checkbox" id="touchMode"> Touch controls instead of tilt</label>
   <button class="big alt" id="resetDefaults">Reset to defaults</button>
@@ -143,19 +144,20 @@
 const DEG = Math.PI / 180;
 
 // ---------- settings ----------
-const DEFAULTS = { dead: 5, maxTilt: 20, turnDead: 5, turnMax: 20, maxTurn: 120, speed: 3, fov: 85, smooth: 0.25 };
+const DEFAULTS = { dead: 5, maxTilt: 20, turnDead: 5, turnMax: 20, maxTurn: 120, leak: 8, speed: 3, fov: 85, smooth: 0.25 };
 const SLIDERS = [
   ['dead',    'Dead zone (°)',              0, 15, 0.5],
   ['maxTilt', 'Full speed at tilt (°)',     8, 40, 0.5],
   ['turnDead', 'Turn dead zone (°)',         0, 15, 0.5],
   ['turnMax',  'Full turn speed at (°)',      8, 40, 0.5],
   ['maxTurn', 'Max turn rate (°/s)',       30, 300, 5],
+  ['leak',    'Auto-recenter time (s, 0 = off)', 0, 20, 0.5],
   ['speed',   'Walk speed (m/s)',           1, 6, 0.1],
   ['fov',     'Horizontal field of view (°)', 60, 110, 1],
   ['smooth',  'Sensor smoothing (low = smoother)', 0.05, 1, 0.05],
 ];
 const S = Object.assign({}, DEFAULTS);
-let prefs = { lefty: false, autoTurn: true };
+let prefs = { lefty: false, autoTurn: true, steerRoll: true };
 try { Object.assign(S, JSON.parse(localStorage.getItem('tiltS') || '{}')); Object.assign(prefs, JSON.parse(localStorage.getItem('tiltP') || '{}')); } catch (e) {}
 function save() { try { localStorage.setItem('tiltS', JSON.stringify(S)); localStorage.setItem('tiltP', JSON.stringify(prefs)); } catch (e) {} }
 
@@ -261,11 +263,22 @@ function relAngles(qNeutral, qNow) {
   const e = new THREE.Euler().setFromQuaternion(qr, 'YXZ');
   return { yaw: e.y / DEG, pitch: e.x / DEG }; // yaw + = turned left, pitch + = top tilted toward you
 }
+// Angles measured against gravity: unaffected by which way your body faces.
+// pitch + = top of phone tilted away from you; roll + = phone tilted to the left.
+const gTmp = new THREE.Vector3();
+function gravAngles(q) {
+  gTmp.set(0, -1, 0).applyQuaternion(q.clone().invert()); // gravity in the phone's frame
+  return { pitch: Math.atan2(-gTmp.z, -gTmp.y) / DEG,         // tilt toward/away
+           ang: Math.atan2(gTmp.y, gTmp.x) / DEG,              // gravity direction across the screen
+           gxy: Math.hypot(gTmp.x, gTmp.y) };                  // ~0 when the screen is flat
+}
+const wrap = (d) => ((d + 540) % 360) - 180;
 function screenOrient() {
   return (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0);
 }
 
 let qNow = null, qNeutral = null, gotEvent = false;
+let nPitch = 0, nAng = 0; // gravity-based neutral
 let tiltS = 0, yawS = 0, rawTilt = 0, rawYaw = 0;
 function onOrient(e) {
   if (e.alpha == null && e.beta == null && e.gamma == null) return;
@@ -277,7 +290,7 @@ function onOrient(e) {
 function recenter(silent) {
   // keep the current view: fold the direct part into the base yaw
   player.yaw += directYaw; directYaw = 0;
-  if (qNow) qNeutral = qNow.clone();
+  if (qNow) { qNeutral = qNow.clone(); const g = gravAngles(qNow); nPitch = g.pitch; nAng = g.ang; }
   tiltS = yawS = rawTilt = rawYaw = 0;
   touch.fwd = 0; touch.turn = 0;
   showToast(silent ? 'Centered' : 'Centered');
@@ -285,7 +298,9 @@ function recenter(silent) {
 
 // Exposed for automated tests
 window.__tilt = { deviceQuat, relAngles, S, player, get speedFrac() { return speedFrac; }, get directYaw() { return directYaw; },
-  setPose(a, b, g) { onOrient({ alpha: a, beta: b, gamma: g }); }, step: (dt) => update(dt), recenter, startMode: (m) => begin(m) };
+  setPose(a, b, g) { onOrient({ alpha: a, beta: b, gamma: g }); },
+  // test hook: pose = (alpha,beta,gamma) then extra rotation about the phone's own axis (x,y,z) by deg
+  setPoseLocal(a, b, g, ax, deg) { const q = deviceQuat(a, b, g, 0); q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(...ax).normalize(), deg * DEG)); gotEvent = true; qNow = q; }, step: (dt) => update(dt), recenter, startMode: (m) => begin(m) };
 
 // ---------- touch fallback ----------
 const touch = { id: null, ox: 0, oy: 0, fwd: 0, turn: 0 };
@@ -380,6 +395,8 @@ $('closeSettings').addEventListener('click', () => {
   paused = mode === 'none'; recenter();
 });
 $('resetDefaults').addEventListener('click', () => { Object.assign(S, DEFAULTS); syncSliders(); applyFov(); save(); });
+$('steerRoll').checked = prefs.steerRoll !== false;
+$('steerRoll').addEventListener('change', () => { prefs.steerRoll = $('steerRoll').checked; save(); });
 $('lefty').checked = !!prefs.lefty; document.body.classList.toggle('lefty', !!prefs.lefty);
 $('lefty').addEventListener('change', () => { prefs.lefty = $('lefty').checked; document.body.classList.toggle('lefty', prefs.lefty); save(); });
 
@@ -422,8 +439,25 @@ function collides(x, z) {
 function update(dt) {
   let turnRate = 0; // rad/s, + = left
   if (mode === 'tilt' && qNow && qNeutral) {
-    const a = relAngles(qNeutral, qNow);
-    rawTilt = -a.pitch; rawYaw = a.yaw;
+    const g = gravAngles(qNow);
+    // slow auto-recenter: neutral drifts toward the current hold
+    if (S.leak > 0) {
+      const lk = Math.min(1, dt / S.leak);
+      nPitch += wrap(g.pitch - nPitch) * lk; nAng += wrap(g.ang - nAng) * lk;
+      qNeutral.slerp(qNow, lk);
+    }
+    rawTilt = wrap(g.pitch - nPitch);
+    if (prefs.steerRoll !== false) {
+      // steering wheel: rotating the phone CCW turns gravity CW across the screen
+      const rollGrav = wrap(nAng - g.ang);
+      // with the screen nearly flat (lying in bed) gravity can't see that rotation, so blend in the gyro-based one
+      const w = Math.max(0, Math.min(1, (0.45 - g.gxy) / 0.25));
+      if (w > 0) {
+        const qr = qNeutral.clone().invert().multiply(qNow);
+        const rollGyro = new THREE.Euler().setFromQuaternion(qr, 'YXZ').z / DEG;
+        rawYaw = rollGrav * (1 - w) + rollGyro * w;
+      } else rawYaw = rollGrav;
+    } else rawYaw = relAngles(qNeutral, qNow).yaw;
     const k = 1 - Math.pow(1 - S.smooth, dt * 60);
     tiltS += (rawTilt - tiltS) * k; yawS += (rawYaw - yawS) * k;
     // walking: dead zone -> linear -> capped
@@ -472,6 +506,7 @@ function update(dt) {
   for (const n of npcs) if (!n.down) { n.phase += dt; n.g.position.y = Math.sin(n.phase * 2) * 0.03; }
 
   if (mode === 'tilt') {
+    $('sMode').textContent = 'mode: tilt · steer: ' + (prefs.steerRoll !== false ? 'tilt sideways' : 'rotate phone') + (S.leak > 0 ? ' · auto-recenter ' + S.leak + 's' : '');
     $('sTilt').textContent = `tilt ${tiltS.toFixed(1)}°  (walk ${S.dead}–${S.maxTilt}°)`;
     $('sTurn').textContent = `turn ${yawS.toFixed(1)}°  (${prefs.autoTurn === false ? 'auto-turn off, 1:1' : 'turn ' + S.turnDead + '–' + S.turnMax + '°'})`;
   } else if (mode === 'touch') {
