@@ -143,12 +143,12 @@
 const DEG = Math.PI / 180;
 
 // ---------- settings ----------
-const DEFAULTS = { dead: 5, maxTilt: 20, direct: 25, ramp: 20, maxTurn: 120, speed: 3, fov: 85, smooth: 0.25 };
+const DEFAULTS = { dead: 5, maxTilt: 20, turnDead: 5, turnMax: 20, maxTurn: 120, speed: 3, fov: 85, smooth: 0.25 };
 const SLIDERS = [
   ['dead',    'Dead zone (°)',              0, 15, 0.5],
   ['maxTilt', 'Full speed at tilt (°)',     8, 40, 0.5],
-  ['direct',  'Direct turn zone (°)',       5, 45, 1],
-  ['ramp',    'Extra turn to max rate (°)', 5, 40, 1],
+  ['turnDead', 'Turn dead zone (°)',         0, 15, 0.5],
+  ['turnMax',  'Full turn speed at (°)',      8, 40, 0.5],
   ['maxTurn', 'Max turn rate (°/s)',       30, 300, 5],
   ['speed',   'Walk speed (m/s)',           1, 6, 0.1],
   ['fov',     'Horizontal field of view (°)', 60, 110, 1],
@@ -433,8 +433,10 @@ function update(dt) {
     if (prefs.autoTurn === false) {
       directYaw = yawS * DEG; // view follows the phone 1:1 at any angle, never keeps turning
     } else {
-      directYaw = sg * Math.min(ay, S.direct) * DEG;
-      if (ay > S.direct) turnRate = sg * Math.min((ay - S.direct) / S.ramp, 1) * S.maxTurn * DEG;
+      // like walking: dead zone -> speed rises linearly -> capped at max
+      directYaw = 0;
+      const tf = ay <= S.turnDead ? 0 : ay >= S.turnMax ? 1 : (ay - S.turnDead) / (S.turnMax - S.turnDead);
+      turnRate = sg * tf * S.maxTurn * DEG;
     }
   } else if (mode === 'touch') {
     speedFrac = touch.fwd; directYaw = 0;
@@ -471,7 +473,7 @@ function update(dt) {
 
   if (mode === 'tilt') {
     $('sTilt').textContent = `tilt ${tiltS.toFixed(1)}°  (walk ${S.dead}–${S.maxTilt}°)`;
-    $('sTurn').textContent = `turn ${yawS.toFixed(1)}°  (${prefs.autoTurn === false ? 'auto-turn off, 1:1' : 'direct ±' + S.direct + '°'})`;
+    $('sTurn').textContent = `turn ${yawS.toFixed(1)}°  (${prefs.autoTurn === false ? 'auto-turn off, 1:1' : 'turn ' + S.turnDead + '–' + S.turnMax + '°'})`;
   } else if (mode === 'touch') {
     $('sTilt').textContent = `fwd ${touch.fwd.toFixed(2)}`;
     $('sTurn').textContent = `turn ${touch.turn.toFixed(2)}`;
@@ -480,9 +482,9 @@ function update(dt) {
   // turn bar: centre = straight; fills left/right. Full = max turn rate (tilt) or full stick (touch).
   let tf = 0, autoOn = false, tickPos = null;
   if (mode === 'tilt') {
-    const full = S.direct + S.ramp;
+    const full = S.turnMax;
     tf = Math.max(-1, Math.min(1, yawS / full));
-    if (prefs.autoTurn !== false) { autoOn = Math.abs(yawS) > S.direct; tickPos = S.direct / full; }
+    if (prefs.autoTurn !== false) { autoOn = Math.abs(yawS) > S.turnDead; tickPos = S.turnDead / full; }
   } else if (mode === 'touch') { tf = Math.max(-1, Math.min(1, touch.turn)); autoOn = tf !== 0; }
   const fill = $('turnfill'), w = Math.abs(tf) * 50;
   fill.style.width = w + '%'; fill.style.left = (tf > 0 ? 50 - w : 50) + '%'; // + = left
