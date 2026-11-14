@@ -17,6 +17,11 @@
   #stats { font: 12px/1.4 ui-monospace, Menlo, monospace; opacity: .9; flex: 1; }
   #speedbar { width: 100%; height: 4px; background: #ffffff22; border-radius: 2px; margin-top: 4px; overflow: hidden; }
   #speedfill { height: 100%; width: 0; background: #5ee6a8; }
+  #turnbar { position: relative; width: 100%; height: 4px; background: #ffffff22; border-radius: 2px; margin-top: 5px; }
+  #turnfill { position: absolute; top: 0; bottom: 0; left: 50%; width: 0; background: #7aa2ff; border-radius: 2px; }
+  #turnfill.auto { background: #f5a524; }
+  #turnbar .mid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 1px; background: #ffffff88; }
+  #turnbar .tick { position: absolute; top: -2px; bottom: -2px; width: 1px; background: #ffffff55; }
   #gear { pointer-events: auto; width: 40px; height: 40px; border-radius: 12px; border: 0; background: #ffffff1a; color: #fff; font-size: 20px; }
 
   #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 70px); transform: translateX(-50%);
@@ -83,6 +88,7 @@
     <div id="sTilt">tilt 0.0°</div>
     <div id="sTurn">turn 0.0°</div>
     <div id="speedbar"><div id="speedfill"></div></div>
+    <div id="turnbar"><div id="turnfill"></div><i class="mid"></i><i class="tick" id="tickL"></i><i class="tick" id="tickR"></i></div>
   </div>
   <button id="gear" aria-label="Settings">⚙︎</button>
 </div>
@@ -471,6 +477,19 @@ function update(dt) {
     $('sTurn').textContent = `turn ${touch.turn.toFixed(2)}`;
   }
   $('speedfill').style.width = (Math.max(0, speedFrac) * 100) + '%';
+  // turn bar: centre = straight; fills left/right. Full = max turn rate (tilt) or full stick (touch).
+  let tf = 0, autoOn = false, tickPos = null;
+  if (mode === 'tilt') {
+    const full = S.direct + S.ramp;
+    tf = Math.max(-1, Math.min(1, yawS / full));
+    if (prefs.autoTurn !== false) { autoOn = Math.abs(yawS) > S.direct; tickPos = S.direct / full; }
+  } else if (mode === 'touch') { tf = Math.max(-1, Math.min(1, touch.turn)); autoOn = tf !== 0; }
+  const fill = $('turnfill'), w = Math.abs(tf) * 50;
+  fill.style.width = w + '%'; fill.style.left = (tf > 0 ? 50 - w : 50) + '%'; // + = left
+  fill.classList.toggle('auto', autoOn);
+  const tl = $('tickL'), tr = $('tickR');
+  if (tickPos == null) { tl.style.display = tr.style.display = 'none'; }
+  else { tl.style.display = tr.style.display = 'block'; tl.style.left = (50 - tickPos * 50) + '%'; tr.style.left = (50 + tickPos * 50) + '%'; }
 }
 let bob = 0;
 
